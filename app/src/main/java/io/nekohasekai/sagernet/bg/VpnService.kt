@@ -17,32 +17,110 @@ import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
 import io.nekohasekai.sagernet.utils.Subnet
 import android.net.VpnService as BaseVpnService
+import kotlinx.coroutines.*
 
 class VpnService : BaseVpnService(),
-    BaseService.Interface {
+    BaseService.Interface, CoroutineScope by CoroutineScope(Dispatchers.Default) {
 
     companion object {
-
-        const val PRIVATE_VLAN4_CLIENT = "172.19.0.1"
-        const val PRIVATE_VLAN4_ROUTER = "172.19.0.2"
-        const val FAKEDNS_VLAN4_CLIENT = "198.18.0.0"
-        const val PRIVATE_VLAN6_CLIENT = "fdfe:dcba:9876::1"
-        const val PRIVATE_VLAN6_ROUTER = "fdfe:dcba:9876::2"
-
+// ... (Existing constants) ...
     }
 
     var conn: ParcelFileDescriptor? = null
 
     private var metered = false
 
-    private val hysteriaProcesses = mutableListOf<Process>()
+    private val supervisorJobs = mutableListOf<Job>()
+    private val coreProcesses = mutableListOf<Process>()
 
     override var upstreamInterfaceName: String? = null
+
+    private fun isPortListening(port: Int): Boolean {
+        return try {
+            java.net.Socket("127.0.0.1", port).use { true }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun startProcessLogger(process: Process, tag: String) {
+        Thread {
+            try {
+                process.inputStream.bufferedReader().use { reader ->
+                    reader.forEachLine { Logs.i("ZIVPN: [$tag] $it") }
+                }
+            } catch (_: Exception) { }
+        }.start()
+        Thread {
+            try {
+                process.errorStream.bufferedReader().use { reader ->
+                    reader.forEachLine { Logs.e("ZIVPN: [$tag] $it") }
+                }
+            } catch (_: Exception) { }
+        }.start()
+    }
+
+    private fun startDaemon(name: String, command: List<String>, env: Map<String, String>, monitorPort: Int) {
+        val job = launch(Dispatchers.IO) {
+            while (isActive && DataStore.serviceState.started) {
+                var process: Process? = null
+                try {
+                    Logs.i("ZIVPN: Starting $name on port $monitorPort...")
+                    val pb = ProcessBuilder(command)
+                    pb.environment().putAll(env)
+                    process = pb.start()
+
+                    synchronized(coreProcesses) {
+                        coreProcesses.add(process)
+                    }
+
+                    startProcessLogger(process, name)
+
+                    // Health Check Loop
+                    val healthCheckJob = launch {
+                        delay(5000)
+                        var failCount = 0
+                        while (isActive && process!!.isAlive) {
+                            if (!isPortListening(monitorPort)) {
+                                failCount++
+                                Logs.w("ZIVPN: $name Health Check Failed ($failCount/3)")
+                                if (failCount >= 3) {
+                                    Logs.e("ZIVPN: $name is unresponsive. Killing...")
+                                    process!!.destroy()
+                                    break
+                                }
+                            } else {
+                                failCount = 0
+                            }
+                            delay(10000)
+                        }
+                    }
+
+                    val exitCode = process.waitFor()
+                    healthCheckJob.cancel()
+
+                    synchronized(coreProcesses) {
+                        coreProcesses.remove(process)
+                    }
+
+                    if (!DataStore.serviceState.started) break
+
+                    Logs.w("ZIVPN: $name exited (Code: $exitCode). Restarting in 2s...")
+                    delay(2000)
+                } catch (e: Exception) {
+                    Logs.e("ZIVPN: Error running $name", e)
+                    process?.destroy()
+                    delay(5000)
+                }
+            }
+        }
+        supervisorJobs.add(job)
+    }
 
     override suspend fun startProcesses() {
         startHysteriaCores()
         DataStore.vpnService = this
-        super.startProcesses() // launch proxy instance
+        super.startProcesses()
     }
 
     override var wakeLock: PowerManager.WakeLock? = null
@@ -219,27 +297,11 @@ class VpnService : BaseVpnService(),
         stopHysteriaCores()
         super.onDestroy()
         data.binder.close()
-    }
-
-    private fun startProcessLogger(process: Process, tag: String) {
-        Thread {
-            try {
-                process.inputStream.bufferedReader().use { reader ->
-                    reader.forEachLine { Logs.i("ZIVPN: [$tag] $it") }
-                }
-            } catch (_: Exception) { }
-        }.start()
-        Thread {
-            try {
-                process.errorStream.bufferedReader().use { reader ->
-                    reader.forEachLine { Logs.e("ZIVPN: [$tag] $it") }
-                }
-            } catch (_: Exception) { }
-        }.start()
+        cancel()
     }
 
     private fun startHysteriaCores() {
-        Thread {
+        launch(Dispatchers.IO) {
             try {
                 val nativeDir = applicationInfo.nativeLibraryDir
                 val libUz = "$nativeDir/libuz_core.so"
@@ -255,46 +317,41 @@ class VpnService : BaseVpnService(),
 
                 stopHysteriaCores()
 
-                val tunnels = StringBuilder()
+                val env = mapOf("LD_LIBRARY_PATH" to nativeDir)
+                val tunnels = mutableListOf<String>()
+                
                 for (i in 0 until coreCount) {
                     val port = 1080 + i
                     val mbpsConfig = if (speedLimit > 0) ",\"up_mbps\":$speedLimit,\"down_mbps\":$speedLimit" else ""
-                    val config = """{"server":"$serverIp:$portRangeStr","obfs":"$obfs","auth":"$pass","socks5":{"listen":"127.0.0.1:$port"},"insecure":true,"recvwindowconn":65536,"recvwindow":262144,"disable_mtu_discovery":true,"resolver":"8.8.8.8:53"$mbpsConfig}"""
+                    val configContent = """{"server":"$serverIp:$portRangeStr","obfs":"$obfs","auth":"$pass","socks5":{"listen":"127.0.0.1:$port"},"insecure":true,"recvwindowconn":65536,"recvwindow":262144,"disable_mtu_discovery":true,"resolver":"8.8.8.8:53"$mbpsConfig}"""
 
-                    val pb = ProcessBuilder(libUz, "-s", obfs, "--config", config)
-                    pb.environment()["LD_LIBRARY_PATH"] = nativeDir
-                    val proc = pb.start()
-                    hysteriaProcesses.add(proc)
-                    startProcessLogger(proc, "Core-$i")
-                    
-                    tunnels.append("127.0.0.1:$port ")
+                    val command = listOf(libUz, "-s", obfs, "--config", configContent)
+                    startDaemon("ZIVPN-Core-$i", command, env, port)
+                    tunnels.add("127.0.0.1:$port")
                 }
 
-                Thread.sleep(1000)
+                delay(1500)
 
-                val tunnelList = tunnels.toString().trim().split(" ").toTypedArray()
-                val lbCmd = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
-                lbCmd.addAll(tunnelList)
-
-                val lbPb = ProcessBuilder(lbCmd)
-                lbPb.environment()["LD_LIBRARY_PATH"] = nativeDir
-                val lbProc = lbPb.start()
-                hysteriaProcesses.add(lbProc)
-                startProcessLogger(lbProc, "LB")
+                val lbArgs = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
+                lbArgs.addAll(tunnels)
+                startDaemon("ZIVPN-LB", lbArgs, env, 7777)
                 
-                Logs.i("ZIVPN: All cores started")
+                Logs.i("ZIVPN: All cores started via supervisor")
 
             } catch (e: Exception) {
                 Logs.e(e)
             }
-        }.start()
+        }
     }
 
     private fun stopHysteriaCores() {
-        hysteriaProcesses.forEach {
-            try { it.destroy() } catch (e: Exception) {}
+        supervisorJobs.forEach { it.cancel() }
+        supervisorJobs.clear()
+
+        synchronized(coreProcesses) {
+            coreProcesses.forEach { it.destroy() }
+            coreProcesses.clear()
         }
-        hysteriaProcesses.clear()
         try {
             Runtime.getRuntime().exec("killall libuz_core.so libload_core.so")
         } catch (e: Exception) {
