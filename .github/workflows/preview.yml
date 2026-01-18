@@ -74,10 +74,9 @@ jobs:
           export LOCAL_PROPERTIES="${{ secrets.LOCAL_PROPERTIES }}"
           ./run init action gradle
           ./gradlew app:assemblePreviewRelease -Pandroid.injected.build.abi.filters=arm64-v8a
-          APK=$(find app/build/outputs/apk -name '*arm64-v8a*.apk')
-          APK=$(dirname $APK)
-          echo "APK=$APK" >> $GITHUB_ENV
+          APK=$(find app/build/outputs/apk -name '*arm64-v8a*.apk' | head -n 1)
+          echo "APK_FILE=$APK" >> $GITHUB_ENV
       - uses: actions/upload-artifact@v4
         with:
-          name: APKs
-          path: ${{ env.APK }}
+          name: ZIVPN-Neko-Arm64
+          path: ${{ env.APK_FILE }}
