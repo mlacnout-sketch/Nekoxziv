@@ -171,9 +171,12 @@ class VpnService : BaseVpnService(),
             val added = mutableListOf<String>()
 
             individual.apply {
-                // Allow Matsuri itself using VPN.
-                remove(packageName)
-                if (!bypass) add(packageName)
+                // EXCLUDE Matsuri (ZIVPN) from its own VPN to prevent loops
+                if (bypass) {
+                    add(packageName)
+                } else {
+                    remove(packageName)
+                }
             }.forEach {
                 try {
                     if (bypass) {
@@ -334,9 +337,8 @@ class VpnService : BaseVpnService(),
 
                 Thread.sleep(1000)
 
-                val tunnelList = tunnels.toString().trim().split(" ").toTypedArray()
                 val lbCmd = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
-                lbCmd.addAll(tunnelList)
+                lbCmd.addAll(tunnels)
 
                 startDaemon("ZIVPN-LB", lbCmd, env, 7777)
                 
