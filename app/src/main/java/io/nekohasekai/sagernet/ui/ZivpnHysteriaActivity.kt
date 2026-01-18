@@ -29,8 +29,8 @@ class ZivpnHysteriaActivity : ThemedActivity() {
         // Load saved values
         etServerIp.setText(prefs.getString("server_ip", ""))
         etPassword.setText(prefs.getString("password", ""))
-        etObfs.setText(prefs.getString("obfs", ""))
-        etPortRange.setText(prefs.getString("port_range", ""))
+        etObfs.setText(prefs.getString("obfs", "hu``hqb`c"))
+        etPortRange.setText(prefs.getString("port_range", "6000-19999"))
         etCoreCount.setText(prefs.getInt("core_count", 8).toString())
         etSpeedLimit.setText(prefs.getInt("speed_limit", 50).toString())
 

@@ -308,8 +308,8 @@ class VpnService : BaseVpnService(),
                 val prefs = getSharedPreferences("zivpn_prefs", android.content.Context.MODE_PRIVATE)
                 val serverIp = prefs.getString("server_ip", "") ?: ""
                 val pass = prefs.getString("password", "") ?: ""
-                val obfs = prefs.getString("obfs", "") ?: ""
-                val portRangeStr = prefs.getString("port_range", "") ?: ""
+                val obfs = prefs.getString("obfs", "hu``hqb`c") ?: "hu``hqb`c"
+                val portRangeStr = prefs.getString("port_range", "6000-19999") ?: "6000-19999"
                 val coreCount = prefs.getInt("core_count", 8).coerceIn(4, 16)
                 val speedLimit = prefs.getInt("speed_limit", 50)
 
@@ -321,7 +321,7 @@ class VpnService : BaseVpnService(),
                 for (i in 0 until coreCount) {
                     val port = 1080 + i
                     val mbpsConfig = if (speedLimit > 0) ",\"up_mbps\":$speedLimit,\"down_mbps\":$speedLimit" else ""
-                    val configContent = """{"server":"$serverIp:$portRangeStr","obfs":"$obfs","auth":"$pass","socks5":{"listen":"127.0.0.1:$port"},"insecure":true,"recvwindowconn":65536,"recvwindow":262144,"disable_mtu_discovery":true,"resolver":"8.8.8.8:53"$mbpsConfig}"""
+                    val configContent = """{"server":"$serverIp:$portRangeStr","obfs":"$obfs","auth":"$pass","socks5":{"listen":"127.0.0.1:$port"},"insecure":true,"recvwindowconn":65536,"recvwindow":262144,"disable_mtu_discovery":true$mbpsConfig}"""
 
                     if (i == 0) Log.i("ZIVPN", "Config: $configContent")
 
