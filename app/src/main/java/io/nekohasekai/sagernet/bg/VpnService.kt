@@ -323,7 +323,7 @@ class VpnService : BaseVpnService(),
                 for (i in 0 until coreCount) {
                     val port = 1080 + i
                     val mbpsConfig = if (speedLimit > 0) ",\"up_mbps\":$speedLimit,\"down_mbps\":$speedLimit" else ""
-                    val configContent = "{\"server\":\"$serverIp:$portRangeStr\",\"obfs\":\"$obfs\",\"auth\":\"$pass\",\"socks5\":{\"listen\":\"127.0.0.1:$port\"},\"insecure\":true,\"recvwindowconn\":65536,\"recvwindow\":262144,\"disable_mtu_discovery\":true,\"resolver\":\"8.8.8.8:53\"$mbpsConfig}"
+                    val configContent = """{"server":"$serverIp:$portRangeStr","obfs":"$obfs","auth":"$pass","socks5":{"listen":"127.0.0.1:$port"},"insecure":true,"recvwindowconn":65536,"recvwindow":262144,"disable_mtu_discovery":true,"resolver":"8.8.8.8:53"$mbpsConfig}"""
 
                     if (i == 0) Log.i("ZIVPN", "Config: $configContent")
 
@@ -338,11 +338,7 @@ class VpnService : BaseVpnService(),
                 val lbCmd = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
                 lbCmd.addAll(tunnelList)
 
-                val lbPb = ProcessBuilder(lbCmd)
-                lbPb.redirectErrorStream(true)
-                lbPb.environment()["LD_LIBRARY_PATH"] = nativeDir
-                val lbProc = lbPb.start()
-                startProcessLogger(lbProc, "LB")
+                startDaemon("ZIVPN-LB", lbCmd, env, 7777)
                 
                 Log.i("ZIVPN", "All cores started")
 
