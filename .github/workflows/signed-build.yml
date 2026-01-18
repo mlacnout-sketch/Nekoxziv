@@ -1,0 +1,45 @@
+name: Signed Arm64 Build
+on:
+  workflow_dispatch:
+
+jobs:
+  build-signed-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: 17
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.5
+
+      - name: Decode Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SIGNING_KEY_STORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
+
+      - name: Build APK
+        env:
+          KEYSTORE_PASS: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          ALIAS_NAME: ${{ secrets.SIGNING_KEY_ALIAS }}
+          ALIAS_PASS: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          chmod +x gradlew
+          ./gradlew app:assemblePreviewRelease
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZIVPN-Neko-Signed-Arm64
+          path: app/build/outputs/apk/preview/release/*arm64-v8a*.apk
