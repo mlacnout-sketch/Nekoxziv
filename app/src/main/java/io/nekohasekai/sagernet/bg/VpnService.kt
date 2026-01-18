@@ -51,7 +51,7 @@ class VpnService : BaseVpnService(),
         Thread {
             try {
                 process.inputStream.bufferedReader().use { reader ->
-                    reader.forEachLine { Logs.i("ZIVPN: [$tag] $it") }
+                    reader.forEachLine { Log.i("ZIVPN", "[$tag] $it") }
                 }
             } catch (_: Exception) { }
         }.start()
@@ -62,7 +62,7 @@ class VpnService : BaseVpnService(),
             while (isActive && DataStore.serviceState.started) {
                 var process: Process? = null
                 try {
-                    Logs.i("ZIVPN: Starting $name on port $monitorPort...")
+                    Log.i("ZIVPN", "Starting $name on port $monitorPort...")
                     val pb = ProcessBuilder(command)
                     pb.redirectErrorStream(true)
                     pb.environment().putAll(env)
@@ -81,9 +81,9 @@ class VpnService : BaseVpnService(),
                         while (isActive && process!!.isAlive) {
                             if (!isPortListening(monitorPort)) {
                                 failCount++
-                                Logs.w("ZIVPN: $name Health Check Failed ($failCount/3)")
+                                Log.w("ZIVPN", "$name Health Check Failed ($failCount/3)")
                                 if (failCount >= 3) {
-                                    Logs.e("ZIVPN: $name is unresponsive. Killing...")
+                                    Log.e("ZIVPN", "$name is unresponsive. Killing...")
                                     process!!.destroy()
                                     break
                                 }
@@ -103,10 +103,10 @@ class VpnService : BaseVpnService(),
 
                     if (!DataStore.serviceState.started) break
 
-                    Logs.w("ZIVPN: $name exited (Code: $exitCode). Restarting in 2s...")
+                    Log.w("ZIVPN", "$name exited (Code: $exitCode). Restarting in 2s...")
                     delay(2000)
                 } catch (e: Exception) {
-                    Logs.e("ZIVPN: Error running $name", e)
+                    Log.e("ZIVPN", "Error running $name", e)
                     process?.destroy()
                     delay(5000)
                 }
@@ -323,23 +323,30 @@ class VpnService : BaseVpnService(),
                     val mbpsConfig = if (speedLimit > 0) ",\"up_mbps\":$speedLimit,\"down_mbps\":$speedLimit" else ""
                     val configContent = """{"server":"$serverIp:$portRangeStr","obfs":"$obfs","auth":"$pass","socks5":{"listen":"127.0.0.1:$port"},"insecure":true,"recvwindowconn":65536,"recvwindow":262144,"disable_mtu_discovery":true,"resolver":"8.8.8.8:53"$mbpsConfig}"""
 
-                    if (i == 0) Logs.i("ZIVPN Config: $configContent")
+                    if (i == 0) Log.i("ZIVPN", "Config: $configContent")
 
                     val command = listOf(libUz, "-s", obfs, "--config", configContent)
                     startDaemon("ZIVPN-Core-$i", command, env, port)
                     tunnels.add("127.0.0.1:$port")
                 }
 
-                delay(1500)
+                Thread.sleep(1000)
 
-                val lbArgs = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
-                lbArgs.addAll(tunnels)
-                startDaemon("ZIVPN-LB", lbArgs, env, 7777)
+                val tunnelList = tunnels.toString().trim().split(" ").toTypedArray()
+                val lbCmd = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
+                lbCmd.addAll(tunnelList)
+
+                val lbPb = ProcessBuilder(lbCmd)
+                lbPb.redirectErrorStream(true)
+                lbPb.environment()["LD_LIBRARY_PATH"] = nativeDir
+                val lbProc = lbPb.start()
+                hysteriaProcesses.add(lbProc)
+                startProcessLogger(lbProc, "LB")
                 
-                Logs.i("ZIVPN: All cores started via supervisor")
+                Log.i("ZIVPN", "All cores started")
 
             } catch (e: Exception) {
-                Logs.e(e)
+                Log.e("ZIVPN", "Failed to start cores", e)
             }
         }
     }
@@ -356,5 +363,6 @@ class VpnService : BaseVpnService(),
             Runtime.getRuntime().exec("killall libuz_core.so libload_core.so")
         } catch (e: Exception) {
         }
+        Log.i("ZIVPN", "Cores stopped")
     }
 }
