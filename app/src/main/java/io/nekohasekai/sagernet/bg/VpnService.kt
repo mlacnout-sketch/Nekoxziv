@@ -171,12 +171,7 @@ class VpnService : BaseVpnService(),
             val added = mutableListOf<String>()
 
             individual.apply {
-                // EXCLUDE Matsuri (ZIVPN) from its own VPN to prevent loops
-                if (bypass) {
-                    add(packageName)
-                } else {
-                    remove(packageName)
-                }
+                remove(packageName)
             }.forEach {
                 try {
                     if (bypass) {
@@ -311,10 +306,10 @@ class VpnService : BaseVpnService(),
                 val libLoad = "$nativeDir/libload_core.so"
 
                 val prefs = getSharedPreferences("zivpn_prefs", android.content.Context.MODE_PRIVATE)
-                val serverIp = prefs.getString("server_ip", "103.175.216.5") ?: ""
-                val pass = prefs.getString("password", "maslexx68") ?: ""
-                val obfs = prefs.getString("obfs", "hu``hqb`c") ?: ""
-                val portRangeStr = prefs.getString("port_range", "6000-19999") ?: "6000-19999"
+                val serverIp = prefs.getString("server_ip", "") ?: ""
+                val pass = prefs.getString("password", "") ?: ""
+                val obfs = prefs.getString("obfs", "") ?: ""
+                val portRangeStr = prefs.getString("port_range", "") ?: ""
                 val coreCount = prefs.getInt("core_count", 8).coerceIn(4, 16)
                 val speedLimit = prefs.getInt("speed_limit", 50)
 
