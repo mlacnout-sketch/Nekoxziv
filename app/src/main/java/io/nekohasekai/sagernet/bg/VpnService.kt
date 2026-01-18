@@ -221,46 +221,73 @@ class VpnService : BaseVpnService(),
         data.binder.close()
     }
 
+    private fun startProcessLogger(process: Process, tag: String) {
+        Thread {
+            try {
+                process.inputStream.bufferedReader().use { reader ->
+                    reader.forEachLine { Logs.i("ZIVPN: [$tag] $it") }
+                }
+            } catch (_: Exception) { }
+        }.start()
+        Thread {
+            try {
+                process.errorStream.bufferedReader().use { reader ->
+                    reader.forEachLine { Logs.e("ZIVPN: [$tag] $it") }
+                }
+            } catch (_: Exception) { }
+        }.start()
+    }
+
     private fun startHysteriaCores() {
-        try {
-            val nativeDir = applicationInfo.nativeLibraryDir
-            val libUz = "$nativeDir/libuz_core.so"
-            val libLoad = "$nativeDir/libload_core.so"
+        Thread {
+            try {
+                val nativeDir = applicationInfo.nativeLibraryDir
+                val libUz = "$nativeDir/libuz_core.so"
+                val libLoad = "$nativeDir/libload_core.so"
 
-            val prefs = getSharedPreferences("zivpn_prefs", android.content.Context.MODE_PRIVATE)
-            val serverIp = prefs.getString("server_ip", "103.175.216.5") ?: ""
-            val pass = prefs.getString("password", "maslexx68") ?: ""
-            val obfs = prefs.getString("obfs", "hu``hqb`c") ?: ""
-            val portRangeStr = prefs.getString("port_range", "6000-19999") ?: "6000-19999"
-            val coreCount = prefs.getInt("core_count", 8).coerceIn(4, 16)
-            val speedLimit = prefs.getInt("speed_limit", 50)
+                val prefs = getSharedPreferences("zivpn_prefs", android.content.Context.MODE_PRIVATE)
+                val serverIp = prefs.getString("server_ip", "103.175.216.5") ?: ""
+                val pass = prefs.getString("password", "maslexx68") ?: ""
+                val obfs = prefs.getString("obfs", "hu``hqb`c") ?: ""
+                val portRangeStr = prefs.getString("port_range", "6000-19999") ?: "6000-19999"
+                val coreCount = prefs.getInt("core_count", 8).coerceIn(4, 16)
+                val speedLimit = prefs.getInt("speed_limit", 50)
 
-            stopHysteriaCores()
+                stopHysteriaCores()
 
-            val tunnels = StringBuilder()
-            for (i in 0 until coreCount) {
-                val port = 1080 + i
-                val mbpsConfig = if (speedLimit > 0) ",\"up_mbps\":$speedLimit,\"down_mbps\":$speedLimit" else ""
-                val config = """{"server":"$serverIp:$portRangeStr","obfs":"$obfs","auth":"$pass","socks5":{"listen":"127.0.0.1:$port"},"insecure":true,"recvwindowconn":65536,"recvwindow":262144,"disable_mtu_discovery":true,"resolver":"8.8.8.8:53"$mbpsConfig}"""
+                val tunnels = StringBuilder()
+                for (i in 0 until coreCount) {
+                    val port = 1080 + i
+                    val mbpsConfig = if (speedLimit > 0) ",\"up_mbps\":$speedLimit,\"down_mbps\":$speedLimit" else ""
+                    val config = """{"server":"$serverIp:$portRangeStr","obfs":"$obfs","auth":"$pass","socks5":{"listen":"127.0.0.1:$port"},"insecure":true,"recvwindowconn":65536,"recvwindow":262144,"disable_mtu_discovery":true,"resolver":"8.8.8.8:53"$mbpsConfig}"""
 
-                val pb = ProcessBuilder(libUz, "-s", obfs, "--config", config)
-                pb.environment()["LD_LIBRARY_PATH"] = nativeDir
-                hysteriaProcesses.add(pb.start())
-                tunnels.append("127.0.0.1:$port ")
+                    val pb = ProcessBuilder(libUz, "-s", obfs, "--config", config)
+                    pb.environment()["LD_LIBRARY_PATH"] = nativeDir
+                    val proc = pb.start()
+                    hysteriaProcesses.add(proc)
+                    startProcessLogger(proc, "Core-$i")
+                    
+                    tunnels.append("127.0.0.1:$port ")
+                }
+
+                Thread.sleep(1000)
+
+                val tunnelList = tunnels.toString().trim().split(" ").toTypedArray()
+                val lbCmd = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
+                lbCmd.addAll(tunnelList)
+
+                val lbPb = ProcessBuilder(lbCmd)
+                lbPb.environment()["LD_LIBRARY_PATH"] = nativeDir
+                val lbProc = lbPb.start()
+                hysteriaProcesses.add(lbProc)
+                startProcessLogger(lbProc, "LB")
+                
+                Logs.i("ZIVPN: All cores started")
+
+            } catch (e: Exception) {
+                Logs.e(e)
             }
-
-            Thread.sleep(1000)
-
-            val tunnelList = tunnels.toString().trim().split(" ").toTypedArray()
-            val lbCmd = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
-            lbCmd.addAll(tunnelList)
-
-            val lbPb = ProcessBuilder(lbCmd)
-            lbPb.environment()["LD_LIBRARY_PATH"] = nativeDir
-            hysteriaProcesses.add(lbPb.start())
-        } catch (e: Exception) {
-            Logs.e(e)
-        }
+        }.start()
     }
 
     private fun stopHysteriaCores() {
