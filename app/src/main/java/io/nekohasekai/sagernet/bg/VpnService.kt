@@ -9,6 +9,7 @@ import android.net.ProxyInfo
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.PowerManager
+import android.util.Log // Direct Android Log for ZIVPN
 import io.nekohasekai.sagernet.*
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.fmt.LOCALHOST
@@ -39,86 +40,10 @@ class VpnService : BaseVpnService(),
 
     override var upstreamInterfaceName: String? = null
 
-    private fun isPortListening(port: Int): Boolean {
-        return try {
-            java.net.Socket("127.0.0.1", port).use { true }
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    private fun startProcessLogger(process: Process, tag: String) {
-        Thread {
-            try {
-                process.inputStream.bufferedReader().use { reader ->
-                    reader.forEachLine { Log.i("ZIVPN", "[$tag] $it") }
-                }
-            } catch (_: Exception) { }
-        }.start()
-    }
-
-    private fun startDaemon(name: String, command: List<String>, env: Map<String, String>, monitorPort: Int) {
-        val job = launch(Dispatchers.IO) {
-            while (isActive && DataStore.serviceState.started) {
-                var process: Process? = null
-                try {
-                    Log.i("ZIVPN", "Starting $name on port $monitorPort...")
-                    val pb = ProcessBuilder(command)
-                    pb.redirectErrorStream(true)
-                    pb.environment().putAll(env)
-                    process = pb.start()
-
-                    synchronized(coreProcesses) {
-                        coreProcesses.add(process)
-                    }
-
-                    startProcessLogger(process, name)
-
-                    // Health Check Loop
-                    val healthCheckJob = launch {
-                        delay(5000)
-                        var failCount = 0
-                        while (isActive && process!!.isAlive) {
-                            if (!isPortListening(monitorPort)) {
-                                failCount++
-                                Log.w("ZIVPN", "$name Health Check Failed ($failCount/3)")
-                                if (failCount >= 3) {
-                                    Log.e("ZIVPN", "$name is unresponsive. Killing...")
-                                    process!!.destroy()
-                                    break
-                                }
-                            } else {
-                                failCount = 0
-                            }
-                            delay(10000)
-                        }
-                    }
-
-                    val exitCode = process.waitFor()
-                    healthCheckJob.cancel()
-
-                    synchronized(coreProcesses) {
-                        coreProcesses.remove(process)
-                    }
-
-                    if (!DataStore.serviceState.started) break
-
-                    Log.w("ZIVPN", "$name exited (Code: $exitCode). Restarting in 2s...")
-                    delay(2000)
-                } catch (e: Exception) {
-                    Log.e("ZIVPN", "Error running $name", e)
-                    process?.destroy()
-                    delay(5000)
-                }
-            }
-        }
-        supervisorJobs.add(job)
-    }
-
     override suspend fun startProcesses() {
         startHysteriaCores()
         DataStore.vpnService = this
-        super.startProcesses()
+        super.startProcesses() // launch proxy instance
     }
 
     override var wakeLock: PowerManager.WakeLock? = null
@@ -152,7 +77,8 @@ class VpnService : BaseVpnService(),
             if (prepare(this) != null) {
                 startActivity(
                     Intent(
-                        this, VpnRequestActivity::class.java
+                        this,
+                        VpnRequestActivity::class.java
                     ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             } else return super<BaseService.Interface>.onStartCommand(intent, flags, startId)
@@ -295,7 +221,83 @@ class VpnService : BaseVpnService(),
         stopHysteriaCores()
         super.onDestroy()
         data.binder.close()
-        cancel()
+        cancel() // Cancel CoroutineScope
+    }
+
+    private fun isPortListening(port: Int): Boolean {
+        return try {
+            java.net.Socket("127.0.0.1", port).use { true }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun startProcessLogger(process: Process, tag: String) {
+        Thread {
+            try {
+                process.inputStream.bufferedReader().use { reader ->
+                    reader.forEachLine { Log.i("ZIVPN", "[$tag] $it") }
+                }
+            } catch (_: Exception) { }
+        }.start()
+    }
+
+    private fun startDaemon(name: String, command: List<String>, env: Map<String, String>, monitorPort: Int) {
+        val job = launch(Dispatchers.IO) {
+            while (isActive && DataStore.serviceState.started) {
+                var process: Process? = null
+                try {
+                    Log.i("ZIVPN", "Starting $name on port $monitorPort...")
+                    val pb = ProcessBuilder(command)
+                    pb.redirectErrorStream(true)
+                    pb.environment().putAll(env)
+                    process = pb.start()
+
+                    synchronized(coreProcesses) {
+                        coreProcesses.add(process)
+                    }
+
+                    startProcessLogger(process, name)
+
+                    // Health Check Loop
+                    val healthCheckJob = launch {
+                        delay(5000)
+                        var failCount = 0
+                        while (isActive && process!!.isAlive) {
+                            if (!isPortListening(monitorPort)) {
+                                failCount++
+                                Log.w("ZIVPN", "$name Health Check Failed ($failCount/3)")
+                                if (failCount >= 3) {
+                                    Log.e("ZIVPN", "$name is unresponsive. Killing...")
+                                    process!!.destroy()
+                                    break
+                                }
+                            } else {
+                                failCount = 0
+                            }
+                            delay(10000)
+                        }
+                    }
+
+                    val exitCode = process.waitFor()
+                    healthCheckJob.cancel()
+
+                    synchronized(coreProcesses) {
+                        coreProcesses.remove(process)
+                    }
+
+                    if (!DataStore.serviceState.started) break
+
+                    Log.w("ZIVPN", "$name exited (Code: $exitCode). Restarting in 2s...")
+                    delay(2000)
+                } catch (e: Exception) {
+                    Log.e("ZIVPN", "Error running $name", e)
+                    process?.destroy()
+                    delay(5000)
+                }
+            }
+        }
+        supervisorJobs.add(job)
     }
 
     private fun startHysteriaCores() {
@@ -321,7 +323,7 @@ class VpnService : BaseVpnService(),
                 for (i in 0 until coreCount) {
                     val port = 1080 + i
                     val mbpsConfig = if (speedLimit > 0) ",\"up_mbps\":$speedLimit,\"down_mbps\":$speedLimit" else ""
-                    val configContent = """{"server":"$serverIp:$portRangeStr","obfs":"$obfs","auth":"$pass","socks5":{"listen":"127.0.0.1:$port"},"insecure":true,"recvwindowconn":65536,"recvwindow":262144,"disable_mtu_discovery":true,"resolver":"8.8.8.8:53"$mbpsConfig}"""
+                    val configContent = "{\"server\":\"$serverIp:$portRangeStr\",\"obfs\":\"$obfs\",\"auth\":\"$pass\",\"socks5\":{\"listen\":\"127.0.0.1:$port\"},\"insecure\":true,\"recvwindowconn\":65536,\"recvwindow\":262144,\"disable_mtu_discovery\":true,\"resolver\":\"8.8.8.8:53\"$mbpsConfig}"
 
                     if (i == 0) Log.i("ZIVPN", "Config: $configContent")
 
@@ -340,7 +342,6 @@ class VpnService : BaseVpnService(),
                 lbPb.redirectErrorStream(true)
                 lbPb.environment()["LD_LIBRARY_PATH"] = nativeDir
                 val lbProc = lbPb.start()
-                hysteriaProcesses.add(lbProc)
                 startProcessLogger(lbProc, "LB")
                 
                 Log.i("ZIVPN", "All cores started")
