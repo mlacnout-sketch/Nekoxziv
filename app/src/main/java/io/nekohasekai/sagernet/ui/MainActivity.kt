@@ -50,6 +50,9 @@ import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import moe.matsuri.nb4a.utils.Util
 
+import io.nekohasekai.sagernet.group.RawUpdater
+import java.io.File
+
 class MainActivity : ThemedActivity(),
     SagerConnection.Callback,
     OnPreferenceDataStoreChangeListener,
@@ -62,6 +65,11 @@ class MainActivity : ThemedActivity(),
         super.onCreate(savedInstanceState)
 
         binding = LayoutMainBinding.inflate(layoutInflater)
+        // ... (Existing binding init) ...
+        
+        // ZIVPN: Auto Import Logic
+        checkAndAutoImportZivpn()
+
         binding.fab.initProgress(binding.fabProgress)
         if (themeResId !in intArrayOf(
                 R.style.Theme_SagerNet_Black
@@ -480,6 +488,32 @@ class MainActivity : ThemedActivity(),
         val fragment =
             supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
         return fragment != null && fragment.onKeyDown(keyCode, event)
+    }
+
+    private fun checkAndAutoImportZivpn() {
+        val backupFile = File("/sdcard/Download/backupconfig")
+        val prefs = getSharedPreferences("zivpn_internal", android.content.Context.MODE_PRIVATE)
+
+        if (backupFile.exists() && !prefs.getBoolean("imported", false)) {
+            runOnDefaultDispatcher {
+                try {
+                    val content = backupFile.readText()
+                    val proxies = RawUpdater.parseRaw(content)
+                    if (!proxies.isNullOrEmpty()) {
+                        val targetId = DataStore.selectedGroupForImport()
+                        for (proxy in proxies) {
+                            ProfileManager.createProfile(targetId, proxy)
+                        }
+                        prefs.edit().putBoolean("imported", true).apply()
+                        onMainDispatcher {
+                            snackbar("ZIVPN Config Auto-Imported!").show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    Logs.e(e)
+                }
+            }
+        }
     }
 
 }
