@@ -55,13 +55,6 @@ class VpnService : BaseVpnService(),
                 }
             } catch (_: Exception) { }
         }.start()
-        Thread {
-            try {
-                process.errorStream.bufferedReader().use { reader ->
-                    reader.forEachLine { Logs.e("ZIVPN: [$tag] $it") }
-                }
-            } catch (_: Exception) { }
-        }.start()
     }
 
     private fun startDaemon(name: String, command: List<String>, env: Map<String, String>, monitorPort: Int) {
@@ -71,6 +64,7 @@ class VpnService : BaseVpnService(),
                 try {
                     Logs.i("ZIVPN: Starting $name on port $monitorPort...")
                     val pb = ProcessBuilder(command)
+                    pb.redirectErrorStream(true)
                     pb.environment().putAll(env)
                     process = pb.start()
 
@@ -328,6 +322,8 @@ class VpnService : BaseVpnService(),
                     val port = 1080 + i
                     val mbpsConfig = if (speedLimit > 0) ",\"up_mbps\":$speedLimit,\"down_mbps\":$speedLimit" else ""
                     val configContent = """{"server":"$serverIp:$portRangeStr","obfs":"$obfs","auth":"$pass","socks5":{"listen":"127.0.0.1:$port"},"insecure":true,"recvwindowconn":65536,"recvwindow":262144,"disable_mtu_discovery":true,"resolver":"8.8.8.8:53"$mbpsConfig}"""
+
+                    if (i == 0) Logs.i("ZIVPN Config: $configContent")
 
                     val command = listOf(libUz, "-s", obfs, "--config", configContent)
                     startDaemon("ZIVPN-Core-$i", command, env, port)
