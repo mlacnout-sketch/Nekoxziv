@@ -324,6 +324,12 @@
             android:name="androidx.room.MultiInstanceInvalidationService"
             android:process=":bg" />
 
+        <activity
+            android:name="io.nekohasekai.sagernet.ui.ZivpnHysteriaActivity"
+            android:configChanges="uiMode"
+            android:label="ZIVPN Settings"
+            android:parentActivityName="io.nekohasekai.sagernet.ui.MainActivity" />
+
     </application>
 
 </manifest>

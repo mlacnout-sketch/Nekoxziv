@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="ZIVPN Hysteria Settings"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp"/>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView android:text="Server Host/IP" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+            <EditText
+                android:id="@+id/et_server_ip"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="103.175.xxx.xxx"/>
+
+            <TextView android:text="Password" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+            <EditText
+                android:id="@+id/et_password"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="auth_pass"/>
+
+            <TextView android:text="Obfs" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+            <EditText
+                android:id="@+id/et_obfs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="hu``hqb`c"/>
+
+            <TextView android:text="Port Ranges (e.g. 6000-19999)" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+            <EditText
+                android:id="@+id/et_port_range"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="6000-19999"/>
+
+            <TextView android:text="Core Count (4-8)" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="16dp"/>
+            <EditText
+                android:id="@+id/et_core_count"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number"
+                android:text="8"/>
+
+            <TextView android:text="Speed Limit (Mbps)" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+            <EditText
+                android:id="@+id/et_speed_limit"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number"
+                android:text="50"/>
+
+        </LinearLayout>
+    </ScrollView>
+
+    <Button
+        android:id="@+id/btn_save"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Save Configuration"/>
+
+</LinearLayout>
