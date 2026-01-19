@@ -17,13 +17,16 @@ jobs:
           mkdir -p build/libuz
           cd build/libuz
           
-          # Initialize Module
-          go mod init libuz_core
+          # Create go.mod MANUALLY to force v1.3.5 and prevent v2 auto-upgrade
+          cat <<'EOF' > go.mod
+          module libuz_core
+
+          go 1.21
+
+          require github.com/apernet/hysteria v1.3.5
+          EOF
           
-          # Force use of v1.3.5
-          go get github.com/apernet/hysteria@v1.3.5
-          
-          # Create main.go (The Wrapper) - Using 'EOF' to prevent shell expansion
+          # Create main.go (The Wrapper)
           cat <<'EOF' > main.go
           package main
 
@@ -146,7 +149,7 @@ jobs:
           }
           EOF
           
-          # Tidy & Vendor
+          # Download deps manually to ensure consistency
           go mod tidy
           
           # Build
