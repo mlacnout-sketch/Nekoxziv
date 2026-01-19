@@ -20,12 +20,11 @@ jobs:
           # Initialize Module
           go mod init libuz_core
           
-          # Get Hysteria v1 Core
-          # Menggunakan v1.3.5 (Stable v1)
+          # Force use of v1.3.5
           go get github.com/apernet/hysteria@v1.3.5
           
-          # Create main.go (The Wrapper)
-          cat <<EOF > main.go
+          # Create main.go (The Wrapper) - Using 'EOF' to prevent shell expansion
+          cat <<'EOF' > main.go
           package main
 
           import (
@@ -140,8 +139,6 @@ jobs:
                   os.Exit(1)
               }
               
-              // Modifikasi sedikit: Handle interrupt signal jika perlu, tapi 
-              // untuk penggunaan ZIVPN, blocking run sudah cukup.
               if err := client.Start(); err != nil {
                   fmt.Fprintf(os.Stderr, "Client error: %v\n", err)
                   os.Exit(1)
@@ -164,7 +161,7 @@ jobs:
           go mod init libload_core
           
           # Create main.go (Simple Round Robin LB)
-          cat <<EOF > main.go
+          cat <<'EOF' > main.go
           package main
 
           import (
@@ -224,7 +221,6 @@ jobs:
 
               dst, err := net.DialTimeout("tcp", backendAddr, 5*time.Second)
               if err != nil {
-                  // fmt.Fprintf(os.Stderr, "Error dialing backend %s: %v\n", backendAddr, err)
                   return
               }
               defer dst.Close()
