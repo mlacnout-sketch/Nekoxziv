@@ -1,0 +1,263 @@
+name: Build Custom Cores (ZIVPN)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-cores:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build libuz_core.so (Hysteria v1 Wrapper)
+        run: |
+          mkdir -p build/libuz
+          cd build/libuz
+          
+          # Initialize Module
+          go mod init libuz_core
+          
+          # Get Hysteria v1 Core
+          # Menggunakan v1.3.5 (Stable v1)
+          go get github.com/apernet/hysteria@v1.3.5
+          
+          # Create main.go (The Wrapper)
+          cat <<EOF > main.go
+          package main
+
+          import (
+              "encoding/json"
+              "flag"
+              "fmt"
+              "math/rand"
+              "os"
+              "strconv"
+              "strings"
+              "time"
+
+              "github.com/apernet/hysteria/core"
+          )
+
+          // Struktur Config sesuai JSON ZIVPN
+          type ClientConfig struct {
+              Server             string `json:"server"`
+              Obfs               string `json:"obfs"`
+              Auth               string `json:"auth"`
+              Socks5             struct {
+                  Listen string `json:"listen"`
+              } `json:"socks5"`
+              Insecure           bool   `json:"insecure"`
+              RecvWindowConn     uint64 `json:"recvwindowconn"`
+              RecvWindow         uint64 `json:"recvwindow"`
+              DisableMtuDiscovery bool   `json:"disable_mtu_discovery"`
+              UpMbps             int    `json:"up_mbps,omitempty"`
+              DownMbps           int    `json:"down_mbps,omitempty"`
+              Resolver           string `json:"resolver,omitempty"`
+          }
+
+          func main() {
+              var obfsFlag string
+              var configContent string
+
+              // Parsing Arguments dari VpnService.kt
+              // args: -s <obfs> --config <json>
+              flag.StringVar(&obfsFlag, "s", "", "Obfuscation password")
+              flag.StringVar(&configContent, "config", "", "JSON Content")
+              flag.Parse()
+
+              if configContent == "" {
+                  fmt.Fprintln(os.Stderr, "Error: Config content required")
+                  os.Exit(1)
+              }
+
+              // Parse JSON
+              var conf ClientConfig
+              err := json.Unmarshal([]byte(configContent), &conf)
+              if err != nil {
+                  fmt.Fprintf(os.Stderr, "Error parsing JSON: %v\n", err)
+                  os.Exit(1)
+              }
+
+              // --- LOGIC PORT RANGE RANDOMIZER (Mirip Asli) ---
+              // Input: "1.2.3.4:1000-2000"
+              if strings.Contains(conf.Server, "-") {
+                  parts := strings.Split(conf.Server, ":")
+                  if len(parts) == 2 {
+                      ip := parts[0]
+                      rangeParts := strings.Split(parts[1], "-")
+                      if len(rangeParts) == 2 {
+                          minPort, err1 := strconv.Atoi(rangeParts[0])
+                          maxPort, err2 := strconv.Atoi(rangeParts[1])
+                          
+                          if err1 == nil && err2 == nil && maxPort >= minPort {
+                              rand.Seed(time.Now().UnixNano())
+                              randomPort := rand.Intn(maxPort-minPort+1) + minPort
+                              
+                              // Reconstruct: "1.2.3.4:1567"
+                              conf.Server = fmt.Sprintf("%s:%d", ip, randomPort)
+                              fmt.Printf("ZIVPN-Core: Selected random port %d from range\n", randomPort)
+                          }
+                      }
+                  }
+              }
+
+              // Override Obfs jika ada flag -s
+              if obfsFlag != "" {
+                  conf.Obfs = obfsFlag
+              }
+
+              // Setup Hysteria Core Config
+              hyConfig := &core.ClientConfig{
+                  ServerAddr: conf.Server,
+                  Auth:       conf.Auth,
+                  Obfs:       conf.Obfs,
+                  Insecure:   conf.Insecure,
+                  SOCKS5: &core.SOCKS5Config{
+                      ListenAddr: conf.Socks5.Listen,
+                  },
+                  ReceiveWindowConn: conf.RecvWindowConn,
+                  ReceiveWindow:     conf.RecvWindow,
+                  DisableMTUDiscovery: conf.DisableMtuDiscovery,
+                  ResolverAddr: conf.Resolver, 
+              }
+              
+              if conf.UpMbps > 0 {
+                  hyConfig.UploadMbps = uint64(conf.UpMbps)
+              }
+              if conf.DownMbps > 0 {
+                  hyConfig.DownloadMbps = uint64(conf.DownMbps)
+              }
+
+              fmt.Printf("ZIVPN-Core: Starting Hysteria to %s\n", conf.Server)
+
+              // Start Client
+              client, err := core.NewClient(hyConfig)
+              if err != nil {
+                  fmt.Fprintf(os.Stderr, "Error creating client: %v\n", err)
+                  os.Exit(1)
+              }
+              
+              // Modifikasi sedikit: Handle interrupt signal jika perlu, tapi 
+              // untuk penggunaan ZIVPN, blocking run sudah cukup.
+              if err := client.Start(); err != nil {
+                  fmt.Fprintf(os.Stderr, "Client error: %v\n", err)
+                  os.Exit(1)
+              }
+          }
+          EOF
+          
+          # Tidy & Vendor
+          go mod tidy
+          
+          # Build
+          echo "Building libuz_core.so..."
+          GOOS=android GOARCH=arm64 go build -ldflags="-s -w" -o ../../libuz_core.so main.go
+
+      - name: Build libload_core.so (Load Balancer)
+        run: |
+          mkdir -p build/libload
+          cd build/libload
+          
+          go mod init libload_core
+          
+          # Create main.go (Simple Round Robin LB)
+          cat <<EOF > main.go
+          package main
+
+          import (
+              "flag"
+              "fmt"
+              "io"
+              "net"
+              "os"
+              "sync"
+              "sync/atomic"
+              "time"
+          )
+
+          func main() {
+              var lport string
+              var tunnelFlag string // not used directly, just to eat the flag
+              
+              // Arguments: -lport 7777 -tunnel 127.0.0.1:1080 127.0.0.1:1081 ...
+              flag.StringVar(&lport, "lport", "7777", "Listen port")
+              flag.StringVar(&tunnelFlag, "tunnel", "", "Tunnel flag (ignored, we read args)")
+              flag.Parse()
+
+              // Sisa arguments adalah list tunnel address
+              backends := flag.Args()
+              if len(backends) == 0 {
+                  fmt.Fprintln(os.Stderr, "Error: No backends provided")
+                  os.Exit(1)
+              }
+
+              fmt.Printf("ZIVPN-LB: Listening on :%s, balancing to %v\n", lport, backends)
+
+              listener, err := net.Listen("tcp", "127.0.0.1:"+lport)
+              if err != nil {
+                  fmt.Fprintf(os.Stderr, "Error listening: %v\n", err)
+                  os.Exit(1)
+              }
+              defer listener.Close()
+
+              var counter uint64
+
+              for {
+                  conn, err := listener.Accept()
+                  if err != nil {
+                      continue
+                  }
+
+                  // Round Robin
+                  idx := atomic.AddUint64(&counter, 1) % uint64(len(backends))
+                  backend := backends[idx]
+
+                  go handleConn(conn, backend)
+              }
+          }
+
+          func handleConn(src net.Conn, backendAddr string) {
+              defer src.Close()
+
+              dst, err := net.DialTimeout("tcp", backendAddr, 5*time.Second)
+              if err != nil {
+                  // fmt.Fprintf(os.Stderr, "Error dialing backend %s: %v\n", backendAddr, err)
+                  return
+              }
+              defer dst.Close()
+
+              // Pipe
+              var wg sync.WaitGroup
+              wg.Add(2)
+
+              go func() {
+                  defer wg.Done()
+                  io.Copy(dst, src)
+                  dst.(*net.TCPConn).CloseWrite()
+              }()
+
+              go func() {
+                  defer wg.Done()
+                  io.Copy(src, dst)
+                  src.(*net.TCPConn).CloseWrite()
+              }()
+
+              wg.Wait()
+          }
+          EOF
+          
+          go mod tidy
+          
+          echo "Building libload_core.so..."
+          GOOS=android GOARCH=arm64 go build -ldflags="-s -w" -o ../../libload_core.so main.go
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zivpn-cores-arm64
+          path: |
+            libuz_core.so
+            libload_core.so
