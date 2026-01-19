@@ -10,7 +10,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.19'
 
       - name: Build libuz_core.so (Hysteria v1 Wrapper)
         run: |
@@ -21,6 +21,7 @@ jobs:
           git clone --depth 1 --branch v1.3.5 https://github.com/apernet/hysteria.git hysteria-src
           
           # HACK: Fix missing go.mod in old Hysteria source if present
+          # Go 1.19 handling of legacy non-module repos is better, but initializing helps
           cd hysteria-src
           if [ ! -f go.mod ]; then
             echo "ZIVPN-Build: Generating go.mod for legacy Hysteria source..."
