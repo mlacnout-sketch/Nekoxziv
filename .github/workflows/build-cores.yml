@@ -17,16 +17,18 @@ jobs:
           mkdir -p build/libuz
           cd build/libuz
           
-          # Create go.mod MANUALLY to force v1.3.5 and prevent v2 auto-upgrade
-          cat <<'EOF' > go.mod
-          module libuz_core
-
-          go 1.21
-
-          require github.com/apernet/hysteria v1.3.5
-          EOF
+          # Clone Hysteria v1.3.5 manually
+          git clone --depth 1 --branch v1.3.5 https://github.com/apernet/hysteria.git hysteria-src
           
-          # Create main.go (The Wrapper)
+          # Initialize Module
+          go mod init libuz_core
+          
+          # Configure go.mod to use local replacement
+          # This forces Go to use the cloned source, bypassing module cache issues
+          go mod edit -require=github.com/apernet/hysteria@v1.3.5
+          go mod edit -replace=github.com/apernet/hysteria=./hysteria-src
+          
+          # Create main.go
           cat <<'EOF' > main.go
           package main
 
@@ -64,8 +66,7 @@ jobs:
               var obfsFlag string
               var configContent string
 
-              // Parsing Arguments dari VpnService.kt
-              // args: -s <obfs> --config <json>
+              // Parsing Arguments
               flag.StringVar(&obfsFlag, "s", "", "Obfuscation password")
               flag.StringVar(&configContent, "config", "", "JSON Content")
               flag.Parse()
@@ -83,8 +84,7 @@ jobs:
                   os.Exit(1)
               }
 
-              // --- LOGIC PORT RANGE RANDOMIZER (Mirip Asli) ---
-              // Input: "1.2.3.4:1000-2000"
+              // --- LOGIC PORT RANGE RANDOMIZER ---
               if strings.Contains(conf.Server, "-") {
                   parts := strings.Split(conf.Server, ":")
                   if len(parts) == 2 {
@@ -97,21 +97,19 @@ jobs:
                           if err1 == nil && err2 == nil && maxPort >= minPort {
                               rand.Seed(time.Now().UnixNano())
                               randomPort := rand.Intn(maxPort-minPort+1) + minPort
-                              
-                              // Reconstruct: "1.2.3.4:1567"
                               conf.Server = fmt.Sprintf("%s:%d", ip, randomPort)
-                              fmt.Printf("ZIVPN-Core: Selected random port %d from range\n", randomPort)
+                              fmt.Printf("ZIVPN-Core: Selected random port %d\n", randomPort)
                           }
                       }
                   }
               }
 
-              // Override Obfs jika ada flag -s
+              // Override Obfs
               if obfsFlag != "" {
                   conf.Obfs = obfsFlag
               }
 
-              // Setup Hysteria Core Config
+              // Setup Core
               hyConfig := &core.ClientConfig{
                   ServerAddr: conf.Server,
                   Auth:       conf.Auth,
@@ -135,7 +133,6 @@ jobs:
 
               fmt.Printf("ZIVPN-Core: Starting Hysteria to %s\n", conf.Server)
 
-              // Start Client
               client, err := core.NewClient(hyConfig)
               if err != nil {
                   fmt.Fprintf(os.Stderr, "Error creating client: %v\n", err)
@@ -149,10 +146,9 @@ jobs:
           }
           EOF
           
-          # Download deps manually to ensure consistency
+          # Tidy will now resolve dependencies from local ./hysteria-src
           go mod tidy
           
-          # Build
           echo "Building libuz_core.so..."
           GOOS=android GOARCH=arm64 go build -ldflags="-s -w" -o ../../libuz_core.so main.go
 
@@ -180,14 +176,12 @@ jobs:
 
           func main() {
               var lport string
-              var tunnelFlag string // not used directly, just to eat the flag
+              var tunnelFlag string
               
-              // Arguments: -lport 7777 -tunnel 127.0.0.1:1080 127.0.0.1:1081 ...
               flag.StringVar(&lport, "lport", "7777", "Listen port")
-              flag.StringVar(&tunnelFlag, "tunnel", "", "Tunnel flag (ignored, we read args)")
+              flag.StringVar(&tunnelFlag, "tunnel", "", "Tunnel flag (ignored)")
               flag.Parse()
 
-              // Sisa arguments adalah list tunnel address
               backends := flag.Args()
               if len(backends) == 0 {
                   fmt.Fprintln(os.Stderr, "Error: No backends provided")
@@ -211,7 +205,6 @@ jobs:
                       continue
                   }
 
-                  // Round Robin
                   idx := atomic.AddUint64(&counter, 1) % uint64(len(backends))
                   backend := backends[idx]
 
@@ -228,7 +221,6 @@ jobs:
               }
               defer dst.Close()
 
-              // Pipe
               var wg sync.WaitGroup
               wg.Add(2)
 
