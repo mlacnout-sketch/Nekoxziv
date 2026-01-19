@@ -20,11 +20,19 @@ jobs:
           # Clone Hysteria v1.3.5 manually
           git clone --depth 1 --branch v1.3.5 https://github.com/apernet/hysteria.git hysteria-src
           
-          # Initialize Module
+          # HACK: Fix missing go.mod in old Hysteria source if present
+          cd hysteria-src
+          if [ ! -f go.mod ]; then
+            echo "ZIVPN-Build: Generating go.mod for legacy Hysteria source..."
+            go mod init github.com/apernet/hysteria
+            go mod tidy
+          fi
+          cd ..
+          
+          # Initialize Wrapper Module
           go mod init libuz_core
           
           # Configure go.mod to use local replacement
-          # This forces Go to use the cloned source, bypassing module cache issues
           go mod edit -require=github.com/apernet/hysteria@v1.3.5
           go mod edit -replace=github.com/apernet/hysteria=./hysteria-src
           
@@ -66,7 +74,6 @@ jobs:
               var obfsFlag string
               var configContent string
 
-              // Parsing Arguments
               flag.StringVar(&obfsFlag, "s", "", "Obfuscation password")
               flag.StringVar(&configContent, "config", "", "JSON Content")
               flag.Parse()
@@ -76,7 +83,6 @@ jobs:
                   os.Exit(1)
               }
 
-              // Parse JSON
               var conf ClientConfig
               err := json.Unmarshal([]byte(configContent), &conf)
               if err != nil {
@@ -84,7 +90,7 @@ jobs:
                   os.Exit(1)
               }
 
-              // --- LOGIC PORT RANGE RANDOMIZER ---
+              // LOGIC PORT RANGE
               if strings.Contains(conf.Server, "-") {
                   parts := strings.Split(conf.Server, ":")
                   if len(parts) == 2 {
@@ -104,12 +110,10 @@ jobs:
                   }
               }
 
-              // Override Obfs
               if obfsFlag != "" {
                   conf.Obfs = obfsFlag
               }
 
-              // Setup Core
               hyConfig := &core.ClientConfig{
                   ServerAddr: conf.Server,
                   Auth:       conf.Auth,
@@ -146,7 +150,7 @@ jobs:
           }
           EOF
           
-          # Tidy will now resolve dependencies from local ./hysteria-src
+          # Tidy (Resolve deps using the hack)
           go mod tidy
           
           echo "Building libuz_core.so..."
@@ -159,7 +163,6 @@ jobs:
           
           go mod init libload_core
           
-          # Create main.go (Simple Round Robin LB)
           cat <<'EOF' > main.go
           package main
 
@@ -179,7 +182,7 @@ jobs:
               var tunnelFlag string
               
               flag.StringVar(&lport, "lport", "7777", "Listen port")
-              flag.StringVar(&tunnelFlag, "tunnel", "", "Tunnel flag (ignored)")
+              flag.StringVar(&tunnelFlag, "tunnel", "", "Tunnel flag")
               flag.Parse()
 
               backends := flag.Args()
