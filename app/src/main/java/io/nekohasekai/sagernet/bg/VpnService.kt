@@ -332,7 +332,9 @@ class VpnService : BaseVpnService(),
 
                 Thread.sleep(1000)
 
-                val lbCmd = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
+                // FIX: Remove "-tunnel" flag to force Standard SOCKS5 Mode.
+                // "Tunnel" mode (Transparent Proxy) likely breaks UDP Associate required by Telegram/DNS.
+                val lbCmd = mutableListOf(libLoad, "-lport", "7777")
                 lbCmd.addAll(tunnels)
 
                 startDaemon("ZIVPN-LB", lbCmd, env, 7777)
